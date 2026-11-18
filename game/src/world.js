@@ -1,4 +1,5 @@
-import { CITY, COMBAT, DISTRICTS, LANDMARKS, PLAYER, POLICE, ROAD_X, ROAD_Y, VEHICLE } from './config.js';
+import { CITY, COMBAT, DISTRICTS, FEEDBACK, LANDMARKS, PLAYER, POLICE, ROAD_X, ROAD_Y, VEHICLE } from './config.js';
+import { acceptContract, emptyContracts, endContract, handoffContract, resultText, routeById, tickContract } from './contracts.js';
 
 export const EVENT_NONE = 0;
 export const EVENT_SHOT = 1;
@@ -6,6 +7,10 @@ export const EVENT_HIT = 2;
 export const EVENT_MISSION = 4;
 export const EVENT_ALERT = 8;
 export const EVENT_CASH = 16;
+export const EVENT_TARGET_HIT = 32;
+export const EVENT_ESCAPE = 64;
+export const EVENT_IMPACT = 128;
+export const EVENT_COURIER_FAIL = 256;
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -25,6 +30,48 @@ export function missionObjective(state) {
   if (state.mission === 1) return { ...LANDMARKS.lantern, text: state.wanted ? 'Lose Bluewatch, then return to Kira' : 'Deliver the package to Kira' };
   if (state.mission === 2) return { ...LANDMARKS.yard, text: state.missionStep ? `Clear the yard: ${state.enemies.filter((e) => e.guard).length} guards left` : 'Recover the signal at Cobalt Yard' };
   return { ...LANDMARKS.yard, text: 'Signal recovered. Chapter complete.' };
+}
+
+// The prompt and interaction share exactly the same range and obstruction rule.
+export function nearbyVehicle(state) {
+  if (state.inCar) return null;
+  let closest = null;
+  let nearest = VEHICLE.entryRange;
+  for (const car of state.vehicles) {
+    const gap = dist(state.player, car);
+    if (!car.occupied && gap < nearest && clearSight(state.buildings, state.player, car)) {
+      nearest = gap;
+      closest = car;
+    }
+  }
+  return closest;
+}
+
+export function pursuitStatus(state) {
+  if (!state.wanted) return { label: 'STREETS CLEAR', seconds: 0, spotted: false };
+  const spotted = state.enemies.some((enemy) => dist(enemy, state.player) < POLICE.sightRange && clearSight(state.buildings, enemy, state.player));
+  return {
+    spotted,
+    seconds: Math.ceil(state.heat * POLICE.escapeSeconds),
+    label: spotted ? 'SPOTTED / BREAK LINE OF SIGHT' : 'SEARCHING / STAY OUT OF SIGHT',
+  };
+}
+
+export function missionBriefing(state) {
+  if (state.mission < 2) return [
+    { label: 'Meet Kira at the Blue Lantern', done: state.mission > 0 },
+    { label: 'Collect the Sunline package in a car', done: state.missionStep === 2 },
+    { label: 'Lose Bluewatch and return to Kira', done: false },
+  ];
+  return [
+    { label: 'Deliver the Sunline package', done: true },
+    { label: 'Reach the signal at Cobalt Yard', done: state.missionStep === 1 || state.mission === 3 },
+    { label: 'Defeat all three yard guards', done: state.mission === 3 },
+  ];
+}
+
+function freshFeedback() {
+  return { hit: 0, damage: 0, impact: 0, district: 0, hitX: 0, hitY: 0 };
 }
 
 function makeCar(random, index) {
@@ -61,9 +108,12 @@ export function createWorld(random, seed = 7) {
     buildings, vehicles, peds, bullets: [], enemies: [], particles: [],
     cash: 1250, wanted: 0, heat: 0, dispatchTimer: 0, mission: 0, missionStep: 0, inCar: false, carId: -1,
     district: 'Marina Azul', notification: 'Find Kira at the Blue Lantern', notificationTime: 6,
+    feedback: freshFeedback(), contracts: emptyContracts(),
   };
 
   function reset() {
+    const records = state.contracts.records;
+    state.contracts = { ...emptyContracts(), records };
     state.time = 0; state.player.x = 710; state.player.y = 560; state.player.angle = 0; state.player.health = PLAYER.maxHealth; state.player.fireCooldown = 0; state.player.invulnerable = 0;
     state.cash = 1250; state.wanted = 0; state.heat = 0; state.dispatchTimer = 0; state.mission = 0; state.missionStep = 0; state.inCar = false; state.carId = -1;
     state.enemies.length = 0; state.bullets.length = 0;
@@ -71,6 +121,7 @@ export function createWorld(random, seed = 7) {
     for (let index = 0; index < state.vehicles.length; index += 1) Object.assign(state.vehicles[index], vehicleStarts[index]);
     for (let index = 0; index < state.peds.length; index += 1) Object.assign(state.peds[index], pedestrianStarts[index]);
     state.district = 'Marina Azul';
+    state.feedback = freshFeedback();
     state.notification = 'Find Kira at the Blue Lantern'; state.notificationTime = 6;
   }
   function notify(message, seconds = 3) { state.notification = message; state.notificationTime = seconds; }
@@ -111,6 +162,7 @@ export function createWorld(random, seed = 7) {
   function damagePlayer(amount) {
     if (state.player.invulnerable > 0) return EVENT_NONE;
     state.player.health -= amount;
+    state.feedback.damage = FEEDBACK.damageSeconds;
     state.player.invulnerable = 0.8;
     if (state.player.health <= 0) {
       const car = state.vehicles.find((item) => item.id === state.carId);
@@ -121,7 +173,9 @@ export function createWorld(random, seed = 7) {
       state.dispatchTimer = 0;
       Object.assign(state.vehicles[0], vehicleStarts[0]);
       if (state.mission === 2) state.missionStep = 0;
-      notify('Harbor Clinic: patched up. Your job is still waiting.', 5);
+      const failed = endContract(state.contracts, 'clinic');
+      notify(failed ? resultText(failed) : 'Harbor Clinic: patched up. Your job is still waiting.', 5);
+      if (failed) return EVENT_HIT | EVENT_COURIER_FAIL;
     }
     return EVENT_HIT;
   }
@@ -141,12 +195,7 @@ export function createWorld(random, seed = 7) {
       notify('On foot. Find your next move.', 2);
       return true;
     }
-    let closest = null;
-    let nearest = VEHICLE.entryRange;
-    for (const car of state.vehicles) {
-      const gap = dist(state.player, car);
-      if (!car.occupied && gap < nearest && clearSight(buildings, state.player, car)) { nearest = gap; closest = car; }
-    }
+    const closest = nearbyVehicle(state);
     if (!closest) { notify('No car nearby. Approach a vehicle and press E.'); return false; }
     closest.occupied = true; closest.ai = false;
     state.inCar = true;
@@ -157,6 +206,22 @@ export function createWorld(random, seed = 7) {
     reportCrime();
     notify('Vehicle acquired. W A S D to drive.', 3);
     return true;
+  }
+  function acceptCourier(id) {
+    if (state.mission === 3 || !acceptContract(state.contracts, id)) return false;
+    notify(`Courier booked: ${routeById(id).pickup.name}. G to collect.`, 5);
+    return true;
+  }
+  function cancelCourier() {
+    const result = endContract(state.contracts, 'cancelled');
+    if (result) notify(resultText(result), 5);
+    return Boolean(result);
+  }
+  function courierHandoff() {
+    const result = handoffContract(state);
+    if (!result) { notify('Reach the violet depot and slow down. G hands off the parcel.'); return null; }
+    notify(result.outcome === 'picked-up' ? `Parcel aboard. Deliver to ${routeById(state.contracts.active.id).destination.name}.` : resultText(result), 6);
+    return result;
   }
   function updateMission() {
     const p = state.player;
@@ -177,6 +242,7 @@ export function createWorld(random, seed = 7) {
       state.mission = 3; state.missionStep = 0; state.cash += 1500;
       state.wanted = 0; state.heat = 0; state.enemies.length = 0;
       state.bullets.length = 0;
+      endContract(state.contracts, 'chapter');
       notify('Chapter complete: Signal in the Rain', 6);
       return EVENT_CASH | EVENT_MISSION;
     }
@@ -186,6 +252,10 @@ export function createWorld(random, seed = 7) {
   function step(dt, input) {
     if (!Number.isFinite(dt) || dt <= 0 || state.mission === 3) return EVENT_NONE;
     dt = Math.min(dt, 1 / 30);
+    let events = EVENT_NONE;
+    for (const key of ['hit', 'damage', 'impact', 'district']) {
+      state.feedback[key] = Math.max(0, state.feedback[key] - dt);
+    }
     state.time += dt; state.notificationTime = Math.max(0, state.notificationTime - dt); state.player.fireCooldown = Math.max(0, state.player.fireCooldown - dt); state.player.invulnerable = Math.max(0, state.player.invulnerable - dt);
     state.dispatchTimer = Math.max(0, state.dispatchTimer - dt);
     const axis = input.axis(); const magnitude = Math.hypot(axis.x, axis.y) || 1;
@@ -197,7 +267,11 @@ export function createWorld(random, seed = 7) {
       car.speed = clamp(car.speed, -VEHICLE.reverseSpeed, VEHICLE.maxSpeed);
       car.angle += turn * VEHICLE.turnRate * dt * Math.min(1, Math.abs(car.speed) / 180) * (car.speed < 0 ? -1 : 1);
       if (move(car, Math.cos(car.angle) * car.speed * dt, Math.sin(car.angle) * car.speed * dt, VEHICLE.radius)) {
-        if (Math.abs(car.speed) > 140) spark(car.x, car.y, '#f8c95d');
+        if (Math.abs(car.speed) > 140) {
+          spark(car.x, car.y, '#f8c95d');
+          state.feedback.impact = FEEDBACK.impactSeconds;
+          events |= EVENT_IMPACT;
+        }
         car.speed *= -0.15;
       }
       state.player.x = car.x; state.player.y = car.y; state.player.angle = car.angle;
@@ -221,13 +295,14 @@ export function createWorld(random, seed = 7) {
     }
     for (const particle of state.particles) { particle.x += particle.vx * dt; particle.y += particle.vy * dt; particle.life -= dt; }
     state.particles = state.particles.filter((particle) => particle.life > 0).slice(-120);
-    let events = EVENT_NONE;
     if (input.firing() && state.player.fireCooldown === 0) { state.player.fireCooldown = PLAYER.fireCooldown; events |= fire(); }
     for (const bullet of state.bullets) {
       bullet.x += bullet.vx * dt; bullet.y += bullet.vy * dt; bullet.life -= dt;
       if (blocksPoint(buildings, bullet.x, bullet.y)) { bullet.life = 0; spark(bullet.x, bullet.y, '#f8c95d'); }
       for (const enemy of state.enemies) if (bullet.life > 0 && enemy.health > 0 && bullet.friendly && dist(bullet, enemy) < 30) {
         enemy.health -= COMBAT.damage; bullet.life = 0;
+        Object.assign(state.feedback, { hit: FEEDBACK.hitSeconds, hitX: enemy.x, hitY: enemy.y });
+        events |= EVENT_TARGET_HIT;
         spark(enemy.x, enemy.y, enemy.guard ? '#ff725c' : '#6c9fff');
         if (enemy.health <= 0) { state.cash += 100; notify(enemy.guard ? 'Yard guard defeated +$100' : 'Patrol neutralized +$100', 2); events |= EVENT_CASH; }
         break;
@@ -242,14 +317,19 @@ export function createWorld(random, seed = 7) {
       if (dist(enemy, state.player) < 40 && enemy.cooldown <= 0 && clearSight(buildings, enemy, state.player)) { enemy.cooldown = 1.2; events |= damagePlayer(8); }
     }
     if (state.wanted) {
-      const spotted = state.enemies.some((enemy) => dist(enemy, state.player) < POLICE.sightRange && clearSight(buildings, enemy, state.player));
+      const { spotted } = pursuitStatus(state);
       state.heat = clamp(state.heat + (spotted ? dt * 0.25 : -dt / POLICE.escapeSeconds), 0, 1);
-      if (state.heat === 0) { state.wanted = 0; state.enemies = state.enemies.filter((enemy) => enemy.guard); notify('Patrol lost. The streets are clear.', 3); }
+      if (state.heat === 0) { state.wanted = 0; state.enemies = state.enemies.filter((enemy) => enemy.guard); notify('Patrol lost. The streets are clear.', 3); events |= EVENT_ESCAPE; }
       else if (spotted && state.dispatchTimer === 0 && state.enemies.length < state.wanted + 1) { addPolice(); state.dispatchTimer = 6; }
     }
-    const district = DISTRICTS.find((item) => state.player.x >= item.x && state.player.x < item.x + item.width && state.player.y >= item.y && state.player.y < item.y + item.height); state.district = district ? district.name : 'Harbor Fringe';
+    const district = DISTRICTS.find((item) => state.player.x >= item.x && state.player.x < item.x + item.width && state.player.y >= item.y && state.player.y < item.y + item.height);
+    const districtName = district ? district.name : 'Harbor Fringe';
+    if (districtName !== state.district) state.feedback.district = FEEDBACK.districtSeconds;
+    state.district = districtName;
+    const expired = tickContract(state.contracts);
+    if (expired) { notify(resultText(expired), 6); events |= EVENT_COURIER_FAIL; }
     events |= updateMission(); return events;
   }
   reset();
-  return { state, reset, step, notify, damagePlayer, addPolice, interact };
+  return { state, reset, step, notify, damagePlayer, addPolice, interact, acceptCourier, cancelCourier, courierHandoff };
 }

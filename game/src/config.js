@@ -4,7 +4,12 @@ export const VIEW = { width: 1280, height: 720 };
 export const CITY = { width: 3600, height: 2400 };
 export const STEP = 1 / 60;
 export const SAVE_SLOT = 'neon-harbor-afterglow.save.v1';
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
+export const COURIER = { range: 100, handoffSpeed: 100, expressBonus: 100, maxCompletions: 9999 };
+// Presentation timers use simulation seconds, so pausing also holds feedback still.
+export const FEEDBACK = { hitSeconds: 0.18, damageSeconds: 0.45, districtSeconds: 2.8, impactSeconds: 0.3 };
+export const AUDIO = { masterVolume: 0.7, engineVolume: 0.018, engineIdle: 42, engineRange: 105 };
+export const SAVE_MAX_CHARACTERS = 100000;
 export const COMBAT = { bulletSpeed: 850, bulletLife: 0.9, damage: 35, guardHealth: 70, guardCount: 3 };
 export const ROAD_X = [430, 880, 1420, 1980, 2500, 3070, 3420];
 export const ROAD_Y = [340, 780, 1220, 1680, 2110];
@@ -17,7 +22,7 @@ export const PALETTE = {
   ink: '#10252d', deep: '#07151b', ocean: '#16778b', oceanLight: '#3bb0b0', sand: '#f1c889',
   road: '#394650', roadEdge: '#78827d', sidewalk: '#b5afa0', grass: '#2f7961',
   building: '#d3775e', buildingLight: '#f3a871', shadow: 'rgba(7, 21, 27, 0.30)',
-  white: '#fff8e9', muted: '#9db4b4', coral: '#ff725c', gold: '#f8c95d', cyan: '#63e0d4', police: '#6c9fff',
+  white: '#fff8e9', muted: '#9db4b4', coral: '#ff725c', gold: '#f8c95d', cyan: '#63e0d4', police: '#6c9fff', courier: '#d5a4ff',
 };
 export const DISTRICTS = [
   { name: 'Marina Azul', x: 0, y: 0, width: 1100, height: 900, color: '#168096' },

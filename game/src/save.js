@@ -1,12 +1,13 @@
-import { CITY, COMBAT, DISTRICTS, PLAYER, POLICE, SAVE_SLOT, SAVE_VERSION, VEHICLE } from './config.js';
+import { CITY, COMBAT, DISTRICTS, PLAYER, POLICE, SAVE_MAX_CHARACTERS, SAVE_SLOT, SAVE_VERSION, VEHICLE } from './config.js';
 import { createRandom } from './random.js';
 import { blocksPoint, createWorld } from './world.js';
+import { emptyContracts, validateContracts } from './contracts.js';
 
 // Reconstruct the saved city before restoring actors: a new page may have a different seed.
 export function saveGame(state) {
   try {
-    const { seed, player, cash, mission, missionStep, wanted, heat, inCar, carId, vehicles, peds, enemies, time, dispatchTimer } = state;
-    localStorage.setItem(SAVE_SLOT, JSON.stringify({ version: SAVE_VERSION, seed, player, cash, mission, missionStep, wanted, heat, inCar, carId, vehicles, peds, enemies, time, dispatchTimer }));
+    const { seed, player, cash, mission, missionStep, wanted, heat, inCar, carId, vehicles, peds, enemies, time, dispatchTimer, contracts } = state;
+    localStorage.setItem(SAVE_SLOT, JSON.stringify({ version: SAVE_VERSION, seed, player, cash, mission, missionStep, wanted, heat, inCar, carId, vehicles, peds, enemies, time, dispatchTimer, contracts }));
     return true;
   } catch { return false; }
 }
@@ -17,8 +18,14 @@ const position = (item) => item && within(item.x, 350, CITY.width - 12) && withi
 
 export function loadGame() {
   try {
-    const data = JSON.parse(localStorage.getItem(SAVE_SLOT) || 'null');
-    if (!data || data.version !== SAVE_VERSION || !integer(data.seed, 0, 0xffffffff) || !position(data.player)) return null;
+    // Bound parsing work before allocating a replacement city. A corrupted slot
+    // must not stall the frame loop or disturb the currently playable run.
+    const serialized = localStorage.getItem(SAVE_SLOT);
+    if (!serialized || serialized.length > SAVE_MAX_CHARACTERS) return null;
+    const data = JSON.parse(serialized);
+    if (!data || ![4, SAVE_VERSION].includes(data.version) || !integer(data.seed, 0, 0xffffffff) || !position(data.player)) return null;
+    const contracts = data.version === 4 ? emptyContracts() : validateContracts(data.contracts);
+    if (!contracts || (data.mission === 3 && contracts.active)) return null;
     if (!within(data.player.health, 1, PLAYER.maxHealth) || !Number.isFinite(data.player.angle)) return null;
     if (!integer(data.cash, 0, 1e9) || !integer(data.mission, 0, 3) || !integer(data.missionStep, 0, 2)) return null;
     if ((data.mission === 0 || data.mission === 3) && data.missionStep !== 0) return null;
@@ -53,10 +60,12 @@ export function loadGame() {
       return { ...state.peds[index], x: saved.x, y: saved.y, phase: saved.phase };
     });
     // No caller state changes until every field, encounter and collision check has passed.
-    Object.assign(state, { cash: data.cash, mission: data.mission, missionStep: data.missionStep, wanted: data.wanted, heat: data.heat, time: data.time, dispatchTimer: data.dispatchTimer, inCar: data.inCar, carId: data.carId, vehicles, peds, enemies });
+    Object.assign(state, { cash: data.cash, mission: data.mission, missionStep: data.missionStep, wanted: data.wanted, heat: data.heat, time: data.time, dispatchTimer: data.dispatchTimer, inCar: data.inCar, carId: data.carId, vehicles, peds, enemies, contracts });
     Object.assign(state.player, { x: data.player.x, y: data.player.y, angle: data.player.angle, health: data.player.health, fireCooldown: 0, invulnerable: 1 });
     state.district = DISTRICTS.find((d) => state.player.x >= d.x && state.player.x < d.x + d.width && state.player.y >= d.y && state.player.y < d.y + d.height)?.name || 'Harbor Fringe';
     world.notify('Game loaded. Your next move is waiting.');
+    // Feedback is transient: fresh timers prevent a saved impact from replaying.
+    state.feedback.district = 0;
     return world;
   } catch { return null; }
 }

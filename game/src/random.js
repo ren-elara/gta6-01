@@ -2,8 +2,14 @@
 // Capture URLs supply a seed; ordinary play chooses one when the page opens.
 
 export function normalizeSeed(value, fallback = 7) {
-  if (value === null || value === '' || !Number.isSafeInteger(Number(value))) return fallback >>> 0;
-  return Number(value) >>> 0;
+  // URL parameters are decimal integers. Whitespace and exponent notation should
+  // not silently select a different city from the one a player meant to share.
+  const bounded = (number) => Number.isInteger(number) && number >= 0 && number <= 0xffffffff;
+  const safeFallback = bounded(fallback) ? fallback : 7;
+  if (typeof value === 'string' && (value.length > 10 || !/^\d+$/.test(value))) return safeFallback;
+  if (typeof value !== 'string' && typeof value !== 'number') return safeFallback;
+  const number = Number(value);
+  return bounded(number) ? number : safeFallback;
 }
 
 export function createRandom(seed) {

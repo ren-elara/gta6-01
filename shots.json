@@ -1,5 +1,6 @@
 [
-  { "name": "1-start.jpg", "query": "?seed=7", "moment": "On foot at the Blue Lantern after starting the live game" },
-  { "name": "2-play.jpg", "query": "?seed=7", "moment": "Driving with the Sunline package, an active wanted level, and responding patrols" },
-  { "name": "3-end.jpg", "query": "?seed=7", "moment": "On foot at Cobalt Yard during the live guard encounter" }
+  { "name": "1-start.jpg", "query": "?seed=7", "moment": "Fresh Chromium play: Kira has given the opening job; the player is on foot beside the Blue Lantern and the teal coupe." },
+  { "name": "2-play.jpg", "query": "?seed=7", "moment": "Fresh keyboard-driven Sunset Switch handoff: the package is aboard and Bluewatch pursuit is live, with the gold marina objective on the HUD." },
+  { "name": "3-end.jpg", "query": "?seed=7", "moment": "Fresh Signal in the Rain encounter: the player has driven to Cobalt Yard and exited the car; the three live guards are awaiting mouse-aimed combat." },
+  { "name": "4-courier.jpg", "query": "?seed=7", "moment": "Live Lantern Plates contract after mouse route selection and G pickup in the coupe: violet destination, elapsed/remaining timer, reward and minimap coexist with the gold story objective. Reduced motion is on." }
 ]

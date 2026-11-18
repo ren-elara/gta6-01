@@ -1,10 +1,14 @@
 import { CITY, DISTRICTS, FONT, PALETTE, ROAD_X, ROAD_Y, VIEW } from './config.js';
-import { missionObjective } from './world.js';
+import { missionBriefing, missionObjective, nearbyVehicle, pursuitStatus } from './world.js';
+import { contractPrompt, contractTarget, courierRank, formatTicks, limitTicks, routeById } from './contracts.js';
+import { drawCourierMenu } from './courier-menu.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_OVER = 'over';
+export const SCREEN_BRIEFING = 'briefing';
+export const SCREEN_COURIER = 'courier';
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -108,16 +112,23 @@ export function createRenderer(canvas) {
     ctx.fillStyle = person.color || PALETTE.cyan; ctx.beginPath(); ctx.arc(person.x, person.y - 9, player ? 9 : 6, 0, Math.PI * 2); ctx.fill();
     ctx.fillRect(person.x - (player ? 8 : 5), person.y - 1, player ? 16 : 10, player ? 21 : 15);
   }
-  function marker(x, y, color, label, time) {
-    ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, 22 + Math.sin(time * 4) * 3, 0, Math.PI * 2); ctx.stroke();
+  function marker(x, y, color, label, time, reducedMotion = false) {
+    const pulse = reducedMotion ? 0 : Math.sin(time * 4) * 3;
+    ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, 22 + pulse, 0, Math.PI * 2); ctx.stroke();
     text(label, x, y - 32, 12, color, 'center', 700);
   }
-  function drawWorld(state) {
+  function drawWorld(state, presentation) {
     ctx.fillStyle = PALETTE.ocean; ctx.fillRect(0, 0, CITY.width, CITY.height);
     roadGrid(); drawBuildings(state);
-    marker(700, 560, PALETTE.cyan, 'BLUE LANTERN', state.time);
-    marker(1420, 1220, PALETTE.gold, 'SUNLINE MARKET', state.time + 1);
-    marker(2740, 1680, PALETTE.coral, 'COBALT YARD', state.time + 2);
+    marker(700, 560, PALETTE.cyan, 'BLUE LANTERN', state.time, presentation.reducedMotion);
+    marker(1420, 1220, PALETTE.gold, 'SUNLINE MARKET', state.time + 1, presentation.reducedMotion);
+    marker(2740, 1680, PALETTE.coral, 'COBALT YARD', state.time + 2, presentation.reducedMotion);
+    const courier = contractTarget(state.contracts);
+    if (courier) {
+      marker(courier.x, courier.y, PALETTE.courier, `${courier.phase.toUpperCase()} / ${courier.name.toUpperCase()}`, state.time, presentation.reducedMotion);
+      ctx.strokeStyle = PALETTE.courier; ctx.lineWidth = 2;
+      ctx.strokeRect(courier.x - 13, courier.y - 12, 26, 24);
+    }
     // Small streetside stalls give each open mission plaza a recognizable silhouette.
     for (const [x, y, color] of [[620, 480, PALETTE.cyan], [1310, 1110, PALETTE.gold], [2690, 1560, PALETTE.coral]]) {
       ctx.fillStyle = 'rgba(7,21,27,0.25)'; ctx.fillRect(x - 38, y + 10, 92, 28);
@@ -143,18 +154,26 @@ export function createRenderer(canvas) {
     ctx.beginPath(); ctx.moveTo(p.x + Math.cos(p.angle) * 22, p.y + Math.sin(p.angle) * 22); ctx.lineTo(p.x + Math.cos(p.angle) * 40, p.y + Math.sin(p.angle) * 40); ctx.stroke();
     const objective = missionObjective(state);
     ctx.strokeStyle = PALETTE.gold; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(objective.x, objective.y, 44 + Math.sin(state.time * 3) * 4, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(objective.x, objective.y, 44 + (presentation.reducedMotion ? 0 : Math.sin(state.time * 3) * 4), 0, Math.PI * 2); ctx.stroke();
+    if (state.feedback.hit > 0) {
+      ctx.globalAlpha = state.feedback.hit / 0.18;
+      ctx.strokeStyle = PALETTE.gold; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(state.feedback.hitX, state.feedback.hitY, 38 + (1 - state.feedback.hit / 0.18) * 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
   function drawObjectiveBearing(state) {
     if (state.mission === 3) return;
-    const objective = missionObjective(state);
+    const courier = contractTarget(state.contracts);
+    const objective = courier || missionObjective(state);
+    const color = courier ? PALETTE.courier : PALETTE.gold;
     const dx = objective.x - camera.x; const dy = objective.y - camera.y;
     if (Math.abs(dx) < 500 && Math.abs(dy) < 190) return;
     const scale = Math.min(500 / Math.max(1, Math.abs(dx)), 190 / Math.max(1, Math.abs(dy)));
     const x = VIEW.width / 2 + dx * scale; const y = VIEW.height / 2 + dy * scale;
     ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(dy, dx));
-    ctx.fillStyle = PALETTE.gold; ctx.beginPath(); ctx.moveTo(13, 0); ctx.lineTo(-10, -9); ctx.lineTo(-6, 0); ctx.lineTo(-10, 9); ctx.closePath(); ctx.fill(); ctx.restore();
-    text(`${Math.round(Math.hypot(objective.x - state.player.x, objective.y - state.player.y))} m`, x, y + 27, 12, PALETTE.gold, 'center', 800);
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(13, 0); ctx.lineTo(-10, -9); ctx.lineTo(-6, 0); ctx.lineTo(-10, 9); ctx.closePath(); ctx.fill(); ctx.restore();
+    text(`${Math.round(Math.hypot(objective.x - state.player.x, objective.y - state.player.y))} m`, x, y + 27, 12, color, 'center', 800);
   }
   function drawMinimap(state) {
     const width = 188; const height = 126; const x = VIEW.width - width - 22; const y = 88;
@@ -171,28 +190,85 @@ export function createRenderer(canvas) {
     const objective = missionObjective(state);
     ctx.fillStyle = PALETTE.gold;
     ctx.fillRect(x + 8 + objective.x / CITY.width * (width - 16) - 3, y + 8 + objective.y / CITY.height * (height - 16) - 3, 6, 6);
+    const active = state.contracts.active;
+    if (active) {
+      const route = routeById(active.id);
+      const mapPoint = (point) => ({ x: x + 8 + point.x / CITY.width * (width - 16), y: y + 8 + point.y / CITY.height * (height - 16) });
+      const from = mapPoint(route.pickup), to = mapPoint(route.destination);
+      ctx.strokeStyle = PALETTE.courier; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+      ctx.strokeRect(from.x - 3, from.y - 3, 6, 6);
+      ctx.fillStyle = PALETTE.courier; ctx.fillRect(to.x - 3, to.y - 3, 6, 6);
+    }
     ctx.fillStyle = PALETTE.coral;
     for (const enemy of state.enemies) ctx.fillRect(x + 8 + enemy.x / CITY.width * (width - 16) - 2, y + 8 + enemy.y / CITY.height * (height - 16) - 2, 4, 4);
     ctx.fillStyle = PALETTE.cyan; ctx.beginPath(); ctx.arc(x + 8 + state.player.x / CITY.width * (width - 16), y + 8 + state.player.y / CITY.height * (height - 16), 4, 0, Math.PI * 2); ctx.fill();
     text('NEON HARBOR', x + 10, y - 8, 11, PALETTE.muted, 'left', 700);
   }
-  function drawHud(state) {
+  function drawHud(state, presentation) {
     panel(18, 18, 330, 78, 'rgba(7,21,27,0.82)');
     text('NEON HARBOR', 34, 46, 20, PALETTE.cyan, 'left', 800); text(state.district.toUpperCase(), 34, 72, 12, PALETTE.muted, 'left', 700);
     text(`$${state.cash.toLocaleString()}`, 326, 48, 18, PALETTE.gold, 'right', 800);
-    text(`VITALS ${Math.max(0, Math.ceil(state.player.health))}%`, 326, 74, 11, state.player.health < 35 ? PALETTE.coral : PALETTE.muted, 'right', 700);
+    const vitalsColor = state.player.health < 35 ? PALETTE.coral : PALETTE.muted;
+    text(`VITALS ${Math.max(0, Math.ceil(state.player.health))}%`, 326, 74, 11, vitalsColor, 'right', 700);
+    ctx.fillStyle = 'rgba(255,248,233,0.16)'; ctx.fillRect(34, 82, 190, 4);
+    ctx.fillStyle = state.player.health < 35 ? PALETTE.coral : PALETTE.cyan; ctx.fillRect(34, 82, 190 * Math.max(0, state.player.health) / 100, 4);
     const stars = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted); text(stars, 34, 120, 19, state.wanted ? PALETTE.gold : PALETTE.muted, 'left', 700);
-    text(state.inCar ? `DRIVING / ${Math.round(Math.abs(state.vehicles[state.carId].speed) * 0.22)} km/h` : 'ON FOOT', 326, 120, 11, PALETTE.muted, 'right', 700);
-    if (state.wanted) { text('BREAK SIGHT TO LOSE BLUEWATCH', 34, 142, 10, PALETTE.muted); ctx.fillStyle = PALETTE.coral; ctx.fillRect(34, 151, 292 * state.heat, 3); }
+    const speed = state.inCar ? Math.round(Math.abs(state.vehicles[state.carId].speed) * 0.22) : 0;
+    text(state.inCar ? `DRIVING / ${speed} km/h` : 'ON FOOT', 326, 120, 11, PALETTE.muted, 'right', 700);
+    if (state.wanted) {
+      const pursuit = pursuitStatus(state);
+      text(`${pursuit.label} / ${pursuit.seconds}s`, 34, 142, 10, pursuit.spotted ? PALETTE.coral : PALETTE.gold, 'left', 700);
+      ctx.fillStyle = 'rgba(255,248,233,0.16)'; ctx.fillRect(34, 151, 292, 3);
+      ctx.fillStyle = pursuit.spotted ? PALETTE.coral : PALETTE.gold; ctx.fillRect(34, 151, 292 * state.heat, 3);
+    }
     drawMinimap(state); drawObjectiveBearing(state);
+    drawCourierHud(state);
+    const settings = `${presentation.reducedMotion ? 'LOW MOTION' : 'FULL MOTION'} / ${presentation.muted ? 'SOUND OFF' : 'SOUND ON'}`;
+    text(settings, VIEW.width - 22, 76, 9, PALETTE.muted, 'right', 700);
     const mission = state.mission === 0 ? 'FIRST LIGHT' : state.mission === 1 ? 'SUNSET SWITCH' : state.mission === 2 ? 'SIGNAL IN THE RAIN' : 'CHAPTER COMPLETE';
     const objective = missionObjective(state);
     panel(18, VIEW.height - 132, 650, 94, 'rgba(7,21,27,0.86)');
     text(mission, 34, VIEW.height - 108, 12, PALETTE.gold, 'left', 800);
     text(objective.text, 34, VIEW.height - 84, 17, PALETTE.white);
     const distance = Math.round(Math.hypot(objective.x - state.player.x, objective.y - state.player.y));
-    text(state.notificationTime > 0 ? state.notification : `GOLD MARKER / ${distance} m to objective`, 34, VIEW.height - 59, 12, PALETTE.muted);
-    text('WASD / ARROWS MOVE   SHIFT SPRINT   E ENTER / EXIT   MOUSE AIM   CLICK / SPACE FIRE   L SAVE   O LOAD   M SOUND   P PAUSE', VIEW.width - 20, VIEW.height - 16, 11, PALETTE.muted, 'right', 600);
+    text(state.notificationTime > 0 ? state.notification : `GOLD MARKER / ${distance} m to objective`, 34, VIEW.height - 59, 12, state.notificationTime > 0 ? PALETTE.white : PALETTE.muted);
+    const car = nearbyVehicle(state);
+    if (car) {
+      panel(VIEW.width - 282, VIEW.height - 124, 262, 48, 'rgba(7,21,27,0.88)');
+      text('E / F  BORROW VEHICLE', VIEW.width - 151, VIEW.height - 94, 13, PALETTE.cyan, 'center', 800);
+      text(`${Math.round(Math.hypot(car.x - state.player.x, car.y - state.player.y))} m  ${car.color.toUpperCase()}`, VIEW.width - 151, VIEW.height - 77, 10, PALETTE.muted, 'center');
+    } else if (state.inCar) {
+      panel(VIEW.width - 282, VIEW.height - 124, 262, 48, 'rgba(7,21,27,0.88)');
+      text('E / F  EXIT VEHICLE', VIEW.width - 151, VIEW.height - 94, 13, PALETTE.cyan, 'center', 800);
+      text('A clear door will be found automatically', VIEW.width - 151, VIEW.height - 77, 10, PALETTE.muted, 'center');
+    }
+    text('WASD MOVE / DRIVE   E CAR   MOUSE AIM   CLICK / SPACE FIRE   H STORY   C COURIER   G HANDOFF   P PAUSE   L SAVE   O LOAD   M SOUND   R MOTION', VIEW.width - 20, VIEW.height - 16, 10, PALETTE.muted, 'right', 600);
+    if (state.feedback.damage > 0) {
+      ctx.fillStyle = `rgba(255,114,92,${Math.min(0.28, state.feedback.damage * 0.45)})`;
+      ctx.fillRect(0, 0, VIEW.width, VIEW.height);
+      text('IMPACT', VIEW.width / 2, 124, 13, PALETTE.white, 'center', 800);
+    } else if (state.feedback.district > 0) {
+      panel(VIEW.width / 2 - 130, 26, 260, 34, 'rgba(7,21,27,0.84)');
+      text(state.district.toUpperCase(), VIEW.width / 2, 49, 12, PALETTE.gold, 'center', 800);
+    }
+  }
+  function drawCourierHud(state) {
+    const active = state.contracts.active;
+    if (!active) {
+      const rank = courierRank(state.contracts.records);
+      text(`C  COURIER / ${rank.unique}/4 ROUTES`, 34, 179, 11, PALETTE.courier, 'left', 800);
+      return;
+    }
+    const route = routeById(active.id);
+    const target = contractTarget(state.contracts);
+    const remaining = limitTicks(route) - active.ticks;
+    panel(18, 174, 420, 132);
+    text(`${route.name.toUpperCase()} / $${route.reward} + EXPRESS`, 34, 198, 12, PALETTE.courier, 'left', 800);
+    text(`${target.phase.toUpperCase()}: ${target.name}`, 34, 223, 16, PALETTE.white);
+    text(`${formatTicks(active.ticks)} elapsed / ${formatTicks(remaining)} left`, 34, 248, 14, remaining < 600 ? PALETTE.coral : PALETTE.courier, 'left', 700);
+    text(contractPrompt(state) || `VIOLET / ${Math.round(Math.hypot(target.x - state.player.x, target.y - state.player.y))} m / C routes & cancel`, 34, 273, 12, PALETTE.muted);
+    ctx.fillStyle = PALETTE.courier; ctx.fillRect(34, 288, 388 * remaining / limitTicks(route), 3);
   }
   function drawOverlay(title, subtitle, prompt, chapter = 'FIRST LIGHT', detail = 'Find Kira at the Blue Lantern. Take the coupe. Make the handoff.', flavor = 'A coastal city of favors, signals, and second chances.') {
     ctx.fillStyle = 'rgba(7,21,27,0.72)'; ctx.fillRect(0, 0, VIEW.width, VIEW.height);
@@ -205,20 +281,48 @@ export function createRenderer(canvas) {
     text(flavor, VIEW.width / 2, 446, 15, PALETTE.muted, 'center');
     text(prompt, VIEW.width / 2, 500, 17, PALETTE.coral, 'center', 800);
   }
-  function draw(state, screen) {
+  function drawBriefing(state, presentation) {
+    ctx.fillStyle = 'rgba(7,21,27,0.76)'; ctx.fillRect(0, 0, VIEW.width, VIEW.height);
+    panel(170, 90, 940, 540, 'rgba(7,21,27,0.95)');
+    text('FIELD BRIEFING', 220, 146, 14, PALETTE.gold, 'left', 800);
+    text(state.mission === 0 ? 'FIRST LIGHT' : state.mission === 1 ? 'SUNSET SWITCH' : state.mission === 2 ? 'SIGNAL IN THE RAIN' : 'AFTERGLOW', 220, 192, 34, PALETTE.cyan, 'left', 800);
+    text('Kira’s route through Neon Harbor', 220, 222, 15, PALETTE.muted);
+    ctx.strokeStyle = PALETTE.coral; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(220, 244); ctx.lineTo(1060, 244); ctx.stroke();
+    const rows = missionBriefing(state);
+    const current = rows.findIndex((row) => !row.done);
+    rows.forEach((row, index) => {
+      const y = 302 + index * 70;
+      ctx.fillStyle = row.done ? PALETTE.cyan : PALETTE.coral; ctx.beginPath(); ctx.arc(244, y - 6, 10, 0, Math.PI * 2); ctx.fill();
+      text(row.done ? '✓' : `${index + 1}`, 244, y - 1, 12, PALETTE.ink, 'center', 800);
+      text(row.label, 278, y, 18, row.done ? PALETTE.muted : PALETTE.white, 'left', row.done ? 500 : 700);
+      text(row.done ? 'COMPLETE' : index === current ? 'CURRENT' : 'UP NEXT', 1030, y, 10, row.done ? PALETTE.cyan : PALETTE.gold, 'right', 800);
+    });
+    panel(220, 500, 840, 74, 'rgba(22,119,139,0.16)');
+    const pursuit = pursuitStatus(state);
+    text(state.wanted ? `BLUEWATCH // ${pursuit.label}` : 'BLUEWATCH // KEEP YOUR HEAD DOWN', 246, 530, 12, state.wanted ? PALETTE.coral : PALETTE.cyan, 'left', 800);
+    text(presentation.reducedMotion ? 'Reduced motion is on. R toggles it.' : 'H or Escape closes this briefing. R toggles reduced motion.', 246, 554, 12, PALETTE.muted);
+    text('C  COURIER CONTRACTS     H / ESCAPE  CLOSE', 1060, 610, 12, PALETTE.gold, 'right', 800);
+  }
+  function draw(state, screen, presentation = { reducedMotion: false }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = PALETTE.deep; ctx.fillRect(0, 0, canvas.width, canvas.height);
     const targetX = Math.max(VIEW.width / 2, Math.min(CITY.width - VIEW.width / 2, state.player.x));
     const targetY = Math.max(VIEW.height / 2, Math.min(CITY.height - VIEW.height / 2, state.player.y));
     if (!cameraReady) { camera.x = targetX; camera.y = targetY; cameraReady = true; }
-    camera.x += (targetX - camera.x) * 0.12; camera.y += (targetY - camera.y) * 0.12;
+    const cameraEase = presentation.reducedMotion ? 1 : 0.12;
+    camera.x += (targetX - camera.x) * cameraEase; camera.y += (targetY - camera.y) * cameraEase;
     ctx.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
     ctx.fillStyle = PALETTE.ocean; ctx.fillRect(0, 0, VIEW.width, VIEW.height);
-    ctx.save(); ctx.translate(VIEW.width / 2 - camera.x, VIEW.height / 2 - camera.y); drawWorld(state); ctx.restore();
+    ctx.save();
+    const shake = state.feedback.impact > 0 && !presentation.reducedMotion ? state.feedback.impact * 4 : 0;
+    ctx.translate(VIEW.width / 2 - camera.x + Math.sin(state.time * 80) * shake, VIEW.height / 2 - camera.y + Math.cos(state.time * 73) * shake);
+    drawWorld(state, presentation); ctx.restore();
     if (screen === SCREEN_TITLE) drawOverlay('NEON HARBOR', 'AFTERGLOW', 'ENTER / SPACE / CLICK TO START · O TO LOAD', 'FIRST LIGHT', 'Find Kira at the Blue Lantern. Take the coupe. Make the handoff.', state.notification === 'No compatible save found.' ? state.notification : 'A coastal city of favors, signals, and second chances.');
     else {
-      drawHud(state);
+      drawHud(state, presentation);
       if (screen === SCREEN_PAUSED) drawOverlay('PAUSED', 'The city can wait.', 'PRESS P OR ENTER TO RESUME', 'CURRENT RUN HELD IN MEMORY', state.notificationTime > 0 ? state.notification : 'Your position, cash, mission, and wanted status are held.', 'Press L to save locally or O to load your last save.');
       if (screen === SCREEN_OVER) drawOverlay('CHAPTER COMPLETE', 'Signal in the Rain is yours.', 'ENTER / SPACE / CLICK TO RESTART', 'NEON HARBOR / AFTERGLOW', 'The Bluewatch signal is yours. $' + state.cash.toLocaleString() + ' in the ledger.', state.notificationTime > 0 && state.notification.includes('save') ? state.notification : 'Kira is waiting for the next signal across the harbor.');
+      if (screen === SCREEN_BRIEFING) drawBriefing(state, presentation);
+      if (screen === SCREEN_COURIER) drawCourierMenu(ctx, text, panel, state, presentation.courierSelection || 0);
     }
   }
   resize(); window.addEventListener('resize', resize);
@@ -231,5 +335,9 @@ export function createRenderer(canvas) {
     const rect = canvas.getBoundingClientRect();
     return { x: rect.left + ((point.x - camera.x + VIEW.width / 2) * view.scale + view.x) * rect.width / canvas.width, y: rect.top + ((point.y - camera.y + VIEW.height / 2) * view.scale + view.y) * rect.height / canvas.height };
   }
-  return { draw, screenToWorld, worldToScreen, resetCamera() { cameraReady = false; } };
+  function screenToView(point) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: ((point.x - rect.left) * canvas.width / rect.width - view.x) / view.scale, y: ((point.y - rect.top) * canvas.height / rect.height - view.y) / view.scale };
+  }
+  return { draw, screenToWorld, screenToView, worldToScreen, resetCamera() { cameraReady = false; } };
 }

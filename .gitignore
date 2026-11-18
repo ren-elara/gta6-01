@@ -2,6 +2,7 @@
 /out/
 /node_modules/
 /test-results/
+/.verify-output/
 /.browser-profile/
 /out-*/
 /coverage/
@@ -23,3 +24,7 @@ secrets.json
 /transcripts/
 /recordings/
 /makefun-run.json
+# Local browser automation profiles
+/.chromium-profile/
+# Isolated filesystem fixtures used by verify-platform.mjs
+/.platform-check-*/
