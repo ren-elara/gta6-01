@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#102a35">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+<meta name="description" content="Explore Neon Harbor on foot or by car, outrun Bluewatch patrols, and recover Kira's stolen signal.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2307151b'/%3E%3Cpath d='M16 48V16L48 48V16' fill='none' stroke='%2363e0d4' stroke-width='7'/%3E%3C/svg%3E">
+<title>Neon Harbor: Afterglow</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07151b; }
+  body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  /* Read aloud, never shown: the status line screen readers announce. */
+  #status, #controls { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #game:focus-visible { outline: 2px solid #63e0d4; outline-offset: -3px; }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0" aria-label="Neon Harbor: Afterglow, a coastal city crime adventure" aria-describedby="controls status">This game needs a browser with Canvas and JavaScript enabled.</canvas>
+<p id="controls">Enter starts. WASD or arrows move and drive. Shift sprints. E enters or exits a car. Mouse aims; click or Space fires. P pauses, L saves, O loads, M toggles sound. Follow the gold objective marker.</p>
+<p id="status" role="status" aria-live="polite"></p>
+<noscript>Enable JavaScript to explore Neon Harbor. All game assets are included locally.</noscript>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

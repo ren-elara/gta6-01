@@ -1,0 +1,25 @@
+# Generated dossiers, local tooling and browser profiles
+/out/
+/node_modules/
+/test-results/
+/.browser-profile/
+/out-*/
+/coverage/
+/artifacts/
+*.tmp
+__pycache__/
+*.log
+*.pid
+.DS_Store
+# Local credentials never belong in the entry
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets.json
+*-keypair.json
+# Recorder artifacts are managed outside the public source repository
+/transcripts/
+/recordings/
+/makefun-run.json
